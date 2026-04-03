@@ -276,23 +276,32 @@ async def register(req: RegisterRequest, response: Response):
 @api_router.post("/auth/login")
 async def login(req: LoginRequest, request: Request, response: Response):
     email = req.email.lower().strip()
-    ip = request.client.host if request.client else "unknown"
-    identifier = f"{ip}:{email}"
+    identifier = email  # Use email-only for brute force (IPs vary through load balancer)
     
     # Brute force check
     attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0})
     if attempt and attempt.get("count", 0) >= 5:
         lockout_until = attempt.get("lockout_until")
-        if lockout_until and datetime.now(timezone.utc).isoformat() < lockout_until:
-            raise HTTPException(status_code=429, detail="Too many attempts. Try again in 15 minutes.")
+        if lockout_until:
+            lockout_dt = datetime.fromisoformat(lockout_until) if isinstance(lockout_until, str) else lockout_until
+            if datetime.now(timezone.utc) < lockout_dt:
+                raise HTTPException(status_code=429, detail="Too many attempts. Try again in 15 minutes.")
+            else:
+                await db.login_attempts.delete_one({"identifier": identifier})
         else:
-            await db.login_attempts.delete_one({"identifier": identifier})
+            raise HTTPException(status_code=429, detail="Too many attempts. Try again in 15 minutes.")
     
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(req.password, user["password_hash"]):
+        # Increment failed attempts; set lockout_until only once count reaches 5
+        current = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0})
+        new_count = (current.get("count", 0) if current else 0) + 1
+        update_fields = {"count": new_count}
+        if new_count >= 5:
+            update_fields["lockout_until"] = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
         await db.login_attempts.update_one(
             {"identifier": identifier},
-            {"$inc": {"count": 1}, "$set": {"lockout_until": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()}},
+            {"$set": update_fields},
             upsert=True
         )
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -515,6 +524,24 @@ async def startup():
     elif not verify_password(admin_password, existing["password_hash"]):
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
         logger.info("Admin password updated")
+    
+    # Seed test rider
+    test_rider_email = "rider@test.com"
+    test_rider_password = "rider123"
+    existing_rider = await db.users.find_one({"email": test_rider_email})
+    if not existing_rider:
+        await db.users.insert_one({
+            "email": test_rider_email,
+            "password_hash": hash_password(test_rider_password),
+            "name": "Test Rider",
+            "city": "Chennai",
+            "device_id": secrets.token_hex(8),
+            "role": "rider",
+            "reward_coins": 0,
+            "redeemed_coins": 0,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        logger.info(f"Test rider seeded: {test_rider_email}")
     
     # Write test credentials
     os.makedirs("/app/memory", exist_ok=True)
