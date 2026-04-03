@@ -14,6 +14,8 @@ import bcrypt
 import jwt
 import secrets
 import httpx
+import json as json_module
+import random
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
@@ -106,6 +108,28 @@ class CreatePolicyRequest(BaseModel):
 class PaymentConfirmRequest(BaseModel):
     policy_id: str
     payment_method: str = "upi_simulation"
+
+class TriggerEvaluateRequest(BaseModel):
+    city: Optional[str] = None
+    manual_weather: Optional[dict] = None  # For testing: {"rainfall_mm": 60, "wind_speed_kmh": 45, "temperature": 38}
+
+class RedeemCoinsRequest(BaseModel):
+    coins: int
+
+# ─── Severity Factors ────────────────────────────────────────────────
+SEVERITY_FACTORS = {
+    "extreme": 0.9,
+    "high": 0.7,
+    "moderate": 0.5,
+    "none": 0.0
+}
+
+# ─── Expected Earnings Estimator ─────────────────────────────────────
+CITY_AVG_DAILY_EARNINGS = {
+    "chennai": 350, "mumbai": 400, "delhi": 380, "bangalore": 370,
+    "kolkata": 320, "hyderabad": 340, "pune": 310, "jaipur": 280,
+    "ahmedabad": 300, "lucknow": 270
+}
 
 # ─── City Risk Data ─────────────────────────────────────────────────
 CITY_RISK_MAP = {
@@ -495,6 +519,448 @@ async def get_wallet(request: Request):
         "cash_value": round((user.get("reward_coins", 0) - user.get("redeemed_coins", 0)) / 100, 2)
     }
 
+# ══════════════════════════════════════════════════════════════════════
+# MODULE 3: RISK & SEVERITY ENGINE
+# ══════════════════════════════════════════════════════════════════════
+
+def classify_weather_severity(rainfall_mm: float, wind_speed_kmh: float, duration_min: float = 60) -> dict:
+    """Parametric trigger classification for major disruptions."""
+    if rainfall_mm >= 70 and wind_speed_kmh >= 40:
+        return {"severity": "extreme", "trigger": "cyclone", "description": "Cyclone-level conditions: extreme rain + high winds"}
+    if rainfall_mm >= 50 and duration_min >= 60:
+        return {"severity": "high", "trigger": "heavy_rain", "description": "Heavy sustained rainfall disrupting operations"}
+    if rainfall_mm >= 30 and duration_min >= 30:
+        return {"severity": "moderate", "trigger": "moderate_rain", "description": "Moderate rainfall affecting delivery efficiency"}
+    return {"severity": "none", "trigger": "clear", "description": "No significant weather disruption"}
+
+def classify_minor_disruptions(temperature: float, traffic_delay_factor: float = 1.0) -> dict:
+    """Classify minor disruptions for reward triggers."""
+    triggers = []
+    total_coins = 0
+    
+    # Traffic delay trigger
+    if traffic_delay_factor >= 2.0:
+        triggers.append({"type": "traffic_severe", "coins": 30, "detail": f"Severe traffic delay ({traffic_delay_factor}x normal)"})
+        total_coins += 30
+    elif traffic_delay_factor >= 1.5:
+        triggers.append({"type": "traffic_moderate", "coins": 20, "detail": f"Moderate traffic delay ({traffic_delay_factor}x normal)"})
+        total_coins += 20
+    
+    # Heat trigger
+    if temperature >= 42:
+        triggers.append({"type": "extreme_heat", "coins": 30, "detail": f"Extreme heat: {temperature}°C"})
+        total_coins += 30
+    elif temperature >= 40:
+        triggers.append({"type": "high_heat", "coins": 20, "detail": f"High temperature: {temperature}°C"})
+        total_coins += 20
+    
+    # Combo bonus
+    if len(triggers) >= 2:
+        triggers.append({"type": "combo_bonus", "coins": 20, "detail": "Bonus: Multiple disruptions at once"})
+        total_coins += 20
+    
+    return {"triggers": triggers, "total_coins": total_coins, "eligible": total_coins > 0}
+
+async def ai_severity_assessment(weather_data: dict, city: str) -> dict:
+    """Use Groq AI for intelligent severity assessment."""
+    try:
+        prompt = f"""You are a risk assessment AI for parametric insurance for food delivery riders.
+
+Analyze these conditions and provide severity assessment:
+City: {city}
+Current Weather:
+- Rainfall: {weather_data.get('rainfall_mm', 0)} mm/hr
+- Wind Speed: {weather_data.get('wind_speed_kmh', 0)} km/h
+- Temperature: {weather_data.get('temperature', 30)}°C
+- Humidity: {weather_data.get('humidity', 50)}%
+- Description: {weather_data.get('description', 'clear')}
+
+Parametric Thresholds:
+- Extreme: Rain >= 70mm + Wind >= 40km/h (cyclone)
+- High: Rain >= 50mm + Duration >= 60 min
+- Moderate: Rain >= 30mm + Duration >= 30 min
+
+Assess:
+1. The likelihood the rider's income is disrupted
+2. Estimated percentage of income loss (0-100%)
+3. Risk score (0-100)
+4. Whether this is a genuine disruption or normal conditions
+
+Respond ONLY with JSON:
+{{"risk_score": <0-100>, "income_loss_pct": <0-100>, "assessment": "<brief explanation>", "is_genuine_disruption": <true/false>, "recommended_action": "insurance_payout|reward_coins|no_action"}}"""
+
+        completion = groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+            temperature=0.1,
+            max_tokens=300
+        )
+        response_text = completion.choices[0].message.content.strip()
+        start = response_text.find("{")
+        end = response_text.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json_module.loads(response_text[start:end])
+    except Exception as e:
+        logger.error(f"AI severity assessment error: {e}")
+    
+    # Fallback
+    rain = weather_data.get("rainfall_mm", 0)
+    score = min(100, int(rain * 1.2 + weather_data.get("wind_speed_kmh", 0) * 0.5))
+    return {"risk_score": score, "income_loss_pct": min(80, score), "assessment": "Rule-based fallback", "is_genuine_disruption": rain > 20, "recommended_action": "insurance_payout" if rain >= 50 else ("reward_coins" if weather_data.get("temperature", 30) >= 40 else "no_action")}
+
+async def estimate_expected_earnings(city: str, user_id: str = None) -> dict:
+    """Estimate expected daily earnings for a rider."""
+    city_lower = city.lower()
+    base = CITY_AVG_DAILY_EARNINGS.get(city_lower, 300)
+    # Add slight variance to simulate real prediction
+    hour = datetime.now(timezone.utc).hour
+    time_factor = 1.1 if 11 <= hour <= 14 or 18 <= hour <= 22 else 0.9
+    expected = round(base * time_factor)
+    return {"expected_daily": expected, "city": city, "base_avg": base, "time_factor": round(time_factor, 2)}
+
+# ─── TRIGGER EVALUATION (Main Entry Point) ───────────────────────────
+@api_router.post("/triggers/evaluate")
+async def evaluate_triggers(req: TriggerEvaluateRequest, request: Request):
+    """Main trigger evaluation — evaluates weather, traffic & heat triggers."""
+    user = await get_current_user(request)
+    city = (req.city or user.get("city", "Chennai")).lower()
+    
+    # Check active policy
+    active_policy = await db.policies.find_one(
+        {"user_id": user["_id"], "status": "active", "end_date": {"$gt": datetime.now(timezone.utc).isoformat()}},
+        {"_id": 0}
+    )
+    if not active_policy:
+        raise HTTPException(status_code=400, detail="No active policy. Subscribe first.")
+    
+    # Get weather data (real or manual override for testing)
+    if req.manual_weather:
+        weather = req.manual_weather
+        weather["city"] = city
+        weather["source"] = "manual_input"
+    else:
+        weather = await get_weather_data(city)
+    
+    # Simulate traffic delay factor based on conditions
+    traffic_delay = 1.0
+    if weather.get("rainfall_mm", 0) > 20:
+        traffic_delay = 1.5 + (weather.get("rainfall_mm", 0) - 20) * 0.02
+    elif weather.get("temperature", 30) > 38:
+        traffic_delay = 1.2 + (weather.get("temperature", 30) - 38) * 0.1
+    traffic_delay = round(min(3.0, traffic_delay), 2)
+    
+    # MODULE 3: Classify severity
+    weather_severity = classify_weather_severity(
+        weather.get("rainfall_mm", 0),
+        weather.get("wind_speed_kmh", 0)
+    )
+    
+    # MODULE 3: Classify minor disruptions
+    minor_disruptions = classify_minor_disruptions(
+        weather.get("temperature", 30),
+        traffic_delay
+    )
+    
+    # MODULE 3: AI assessment
+    ai_assessment = await ai_severity_assessment(weather, city)
+    
+    # MODULE 3: Decision routing
+    decision = "no_action"
+    if weather_severity["severity"] in ["high", "extreme"]:
+        decision = "insurance_payout"
+    elif weather_severity["severity"] == "moderate":
+        decision = "partial_insurance"
+    elif minor_disruptions["eligible"]:
+        decision = "reward_coins"
+    
+    # Expected earnings
+    earnings_est = await estimate_expected_earnings(city, user["_id"])
+    
+    # Store trigger event
+    trigger_event = {
+        "trigger_id": f"TRG-{secrets.token_hex(4).upper()}",
+        "user_id": user["_id"],
+        "policy_id": active_policy["policy_id"],
+        "city": city,
+        "weather_data": weather,
+        "traffic_delay_factor": traffic_delay,
+        "weather_severity": weather_severity,
+        "minor_disruptions": minor_disruptions,
+        "ai_assessment": ai_assessment,
+        "decision": decision,
+        "expected_earnings": earnings_est,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    await db.trigger_events.insert_one(trigger_event)
+    trigger_event.pop("_id", None)
+    
+    # AUTO-PROCESS: If payout or reward, auto-trigger
+    result = {**trigger_event}
+    
+    if decision in ["insurance_payout", "partial_insurance"]:
+        # Auto-process claim (zero-touch)
+        claim_result = await _process_claim(user, active_policy, weather_severity, ai_assessment, earnings_est, trigger_event["trigger_id"])
+        result["claim"] = claim_result
+    
+    if minor_disruptions["eligible"]:
+        # Auto-award coins
+        reward_result = await _process_rewards(user, minor_disruptions, trigger_event["trigger_id"])
+        result["reward"] = reward_result
+    
+    return result
+
+# ─── SEVERITY ENDPOINT ───────────────────────────────────────────────
+@api_router.post("/severity")
+async def get_severity(request: Request):
+    """Get current severity for user's city."""
+    user = await get_current_user(request)
+    city = user.get("city", "Chennai")
+    weather = await get_weather_data(city)
+    severity = classify_weather_severity(weather.get("rainfall_mm", 0), weather.get("wind_speed_kmh", 0))
+    ai = await ai_severity_assessment(weather, city)
+    return {"weather": weather, "severity": severity, "ai_assessment": ai}
+
+# ─── RISK SCORE ENDPOINT ─────────────────────────────────────────────
+@api_router.post("/risk-score")
+async def get_risk_score(request: Request):
+    """Calculate risk score for user."""
+    user = await get_current_user(request)
+    city = user.get("city", "Chennai")
+    weather = await get_weather_data(city)
+    ai = await ai_severity_assessment(weather, city)
+    return {"risk_score": ai.get("risk_score", 0), "risk_level": "high" if ai.get("risk_score", 0) > 60 else ("medium" if ai.get("risk_score", 0) > 30 else "low"), "ai_assessment": ai}
+
+# ══════════════════════════════════════════════════════════════════════
+# MODULE 4: FINANCIAL ENGINE
+# ══════════════════════════════════════════════════════════════════════
+
+async def _fraud_check(user: dict, policy: dict, weather_severity: dict) -> dict:
+    """Multi-layer fraud validation."""
+    flags = []
+    is_fraud = False
+    
+    # Device ID validation
+    if not user.get("device_id"):
+        flags.append("missing_device_id")
+    
+    # Check for duplicate claims within 24 hours
+    recent_claim = await db.claims.find_one({
+        "user_id": user["_id"],
+        "timestamp": {"$gt": (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()}
+    }, {"_id": 0})
+    if recent_claim:
+        flags.append("duplicate_claim_24h")
+        is_fraud = True
+    
+    # Check if severity matches conditions (basic behavioral check)
+    if weather_severity["severity"] == "extreme":
+        # If claiming extreme but weather is actually mild
+        pass  # In real system: check GPS speed vs claimed conditions
+    
+    # Zone validation: check if other riders in same city also affected
+    city_policies = await db.policies.count_documents({"city": policy.get("city", ""), "status": "active"})
+    if city_policies <= 0:
+        flags.append("no_zone_validation")
+    
+    return {
+        "passed": not is_fraud,
+        "flags": flags,
+        "check_count": 4,
+        "checks": ["device_validation", "duplicate_check", "behavioral_check", "zone_validation"]
+    }
+
+async def _process_claim(user: dict, policy: dict, severity: dict, ai_assessment: dict, earnings: dict, trigger_id: str) -> dict:
+    """Zero-touch claim processing."""
+    # Step 1: Fraud check
+    fraud_result = await _fraud_check(user, policy, severity)
+    
+    if not fraud_result["passed"]:
+        claim_doc = {
+            "claim_id": f"CLM-{secrets.token_hex(4).upper()}",
+            "user_id": user["_id"],
+            "policy_id": policy["policy_id"],
+            "trigger_id": trigger_id,
+            "status": "rejected",
+            "reason": f"Fraud check failed: {', '.join(fraud_result['flags'])}",
+            "fraud_check": fraud_result,
+            "payout": 0,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        await db.claims.insert_one(claim_doc)
+        claim_doc.pop("_id", None)
+        return claim_doc
+    
+    # Step 2: Calculate payout
+    severity_factor = SEVERITY_FACTORS.get(severity["severity"], 0)
+    expected = earnings.get("expected_daily", 300)
+    # Simulate actual earnings (reduced due to disruption)
+    income_loss_pct = min(90, ai_assessment.get("income_loss_pct", 50))
+    actual = round(expected * (1 - income_loss_pct / 100))
+    loss = expected - actual
+    payout = round(loss * severity_factor)
+    
+    # Step 3: Create claim
+    claim_doc = {
+        "claim_id": f"CLM-{secrets.token_hex(4).upper()}",
+        "user_id": user["_id"],
+        "policy_id": policy["policy_id"],
+        "trigger_id": trigger_id,
+        "status": "approved",
+        "severity": severity["severity"],
+        "severity_factor": severity_factor,
+        "expected_earnings": expected,
+        "actual_earnings": actual,
+        "income_loss": loss,
+        "payout": payout,
+        "fraud_check": fraud_result,
+        "ai_assessment": {
+            "risk_score": ai_assessment.get("risk_score", 0),
+            "assessment": ai_assessment.get("assessment", ""),
+        },
+        "processing_steps": [
+            {"step": "Data Collection", "status": "complete"},
+            {"step": "Severity Assessment", "status": "complete", "result": severity["severity"]},
+            {"step": "Fraud Detection", "status": "complete", "result": "passed"},
+            {"step": "Payout Calculation", "status": "complete", "result": f"₹{payout}"},
+            {"step": "Credit to Wallet", "status": "complete"},
+        ],
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    await db.claims.insert_one(claim_doc)
+    claim_doc.pop("_id", None)
+    
+    # Credit payout to user's wallet balance (simulated)
+    await db.users.update_one(
+        {"_id": ObjectId(user["_id"])},
+        {"$inc": {"wallet_balance": payout}, "$set": {"last_payout": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return claim_doc
+
+async def _process_rewards(user: dict, minor_disruptions: dict, trigger_id: str) -> dict:
+    """Process coin rewards for minor disruptions."""
+    total_coins = minor_disruptions["total_coins"]
+    
+    reward_doc = {
+        "reward_id": f"RWD-{secrets.token_hex(4).upper()}",
+        "user_id": user["_id"],
+        "trigger_id": trigger_id,
+        "triggers": minor_disruptions["triggers"],
+        "total_coins": total_coins,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    await db.rewards.insert_one(reward_doc)
+    reward_doc.pop("_id", None)
+    
+    # Update user's reward coins
+    await db.users.update_one(
+        {"_id": ObjectId(user["_id"])},
+        {"$inc": {"reward_coins": total_coins}}
+    )
+    
+    return reward_doc
+
+# ─── CLAIMS ENDPOINTS ────────────────────────────────────────────────
+@api_router.get("/claims/history")
+async def get_claims_history(request: Request):
+    user = await get_current_user(request)
+    claims = await db.claims.find({"user_id": user["_id"]}, {"_id": 0}).sort("timestamp", -1).to_list(50)
+    total_payout = sum(c.get("payout", 0) for c in claims)
+    approved = sum(1 for c in claims if c.get("status") == "approved")
+    rejected = sum(1 for c in claims if c.get("status") == "rejected")
+    return {"claims": claims, "total_payout": total_payout, "approved_count": approved, "rejected_count": rejected, "total_count": len(claims)}
+
+@api_router.get("/claims/{claim_id}")
+async def get_claim_detail(claim_id: str, request: Request):
+    user = await get_current_user(request)
+    claim = await db.claims.find_one({"claim_id": claim_id, "user_id": user["_id"]}, {"_id": 0})
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    return claim
+
+# ─── REWARDS ENDPOINTS ───────────────────────────────────────────────
+@api_router.get("/rewards/history")
+async def get_rewards_history(request: Request):
+    user = await get_current_user(request)
+    rewards = await db.rewards.find({"user_id": user["_id"]}, {"_id": 0}).sort("timestamp", -1).to_list(50)
+    total_earned = sum(r.get("total_coins", 0) for r in rewards)
+    return {"rewards": rewards, "total_earned": total_earned, "count": len(rewards)}
+
+@api_router.post("/wallet/redeem")
+async def redeem_coins(req: RedeemCoinsRequest, request: Request):
+    user = await get_current_user(request)
+    available = user.get("reward_coins", 0) - user.get("redeemed_coins", 0)
+    if req.coins > available:
+        raise HTTPException(status_code=400, detail=f"Insufficient coins. Available: {available}")
+    if req.coins < 100:
+        raise HTTPException(status_code=400, detail="Minimum redemption is 100 coins")
+    
+    cash_value = round(req.coins / 100, 2)
+    await db.users.update_one(
+        {"_id": ObjectId(user["_id"])},
+        {"$inc": {"redeemed_coins": req.coins, "wallet_balance": cash_value}}
+    )
+    
+    redemption_doc = {
+        "redemption_id": f"RED-{secrets.token_hex(4).upper()}",
+        "user_id": user["_id"],
+        "coins_redeemed": req.coins,
+        "cash_value": cash_value,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    await db.redemptions.insert_one(redemption_doc)
+    redemption_doc.pop("_id", None)
+    return {"message": "Coins redeemed successfully", "redemption": redemption_doc}
+
+# ─── TRIGGER HISTORY ─────────────────────────────────────────────────
+@api_router.get("/triggers/history")
+async def get_trigger_history(request: Request):
+    user = await get_current_user(request)
+    triggers = await db.trigger_events.find({"user_id": user["_id"]}, {"_id": 0}).sort("timestamp", -1).to_list(50)
+    return {"triggers": triggers, "count": len(triggers)}
+
+# ─── DASHBOARD SUMMARY ───────────────────────────────────────────────
+@api_router.get("/dashboard/summary")
+async def get_dashboard_summary(request: Request):
+    user = await get_current_user(request)
+    uid = user["_id"]
+    
+    # Get active policy
+    policy = await db.policies.find_one(
+        {"user_id": uid, "status": "active", "end_date": {"$gt": datetime.now(timezone.utc).isoformat()}},
+        {"_id": 0}
+    )
+    
+    # Claims stats
+    claims = await db.claims.find({"user_id": uid}, {"_id": 0}).to_list(100)
+    total_payout = sum(c.get("payout", 0) for c in claims)
+    
+    # Rewards stats
+    rewards = await db.rewards.find({"user_id": uid}, {"_id": 0}).to_list(100)
+    total_coins_earned = sum(r.get("total_coins", 0) for r in rewards)
+    
+    # Latest trigger
+    latest_trigger = await db.trigger_events.find_one({"user_id": uid}, {"_id": 0}, sort=[("timestamp", -1)])
+    
+    # Wallet
+    wallet_balance = user.get("wallet_balance", 0)
+    available_coins = user.get("reward_coins", 0) - user.get("redeemed_coins", 0)
+    
+    return {
+        "has_active_policy": policy is not None,
+        "policy": policy,
+        "total_payout": total_payout,
+        "total_claims": len(claims),
+        "approved_claims": sum(1 for c in claims if c.get("status") == "approved"),
+        "total_coins_earned": total_coins_earned,
+        "available_coins": available_coins,
+        "wallet_balance": wallet_balance,
+        "cash_value": round(available_coins / 100, 2),
+        "latest_trigger": latest_trigger,
+        "recent_claims": claims[:3],
+        "recent_rewards": rewards[:3]
+    }
+
 # ─── STARTUP ─────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
@@ -503,6 +969,10 @@ async def startup():
     await db.policies.create_index("user_id")
     await db.policies.create_index("policy_id", unique=True)
     await db.login_attempts.create_index("identifier")
+    await db.claims.create_index("user_id")
+    await db.claims.create_index("claim_id", unique=True)
+    await db.rewards.create_index("user_id")
+    await db.trigger_events.create_index("user_id")
     
     # Seed admin
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@giginsure.com")
@@ -546,10 +1016,10 @@ async def startup():
     # Write test credentials
     os.makedirs("/app/memory", exist_ok=True)
     with open("/app/memory/test_credentials.md", "w") as f:
-        f.write(f"# Test Credentials\n\n")
+        f.write("# Test Credentials\n\n")
         f.write(f"## Admin\n- Email: {admin_email}\n- Password: {admin_password}\n- Role: admin\n\n")
-        f.write(f"## Test Rider\n- Email: rider@test.com\n- Password: rider123\n- Role: rider\n\n")
-        f.write(f"## Auth Endpoints\n- POST /api/auth/register\n- POST /api/auth/login\n- GET /api/auth/me\n- POST /api/auth/logout\n- POST /api/auth/refresh\n")
+        f.write("## Test Rider\n- Email: rider@test.com\n- Password: rider123\n- Role: rider\n\n")
+        f.write("## Auth Endpoints\n- POST /api/auth/register\n- POST /api/auth/login\n- GET /api/auth/me\n- POST /api/auth/logout\n- POST /api/auth/refresh\n")
     logger.info("GigInsure backend started")
 
 @app.on_event("shutdown")

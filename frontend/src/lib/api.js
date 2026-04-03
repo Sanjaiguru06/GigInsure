@@ -28,10 +28,37 @@ export const weather = {
 
 export const wallet = {
   get: () => api.get('/wallet'),
+  redeem: (coins) => api.post('/wallet/redeem', { coins }),
 };
 
 export const cities = {
   getAll: () => api.get('/cities'),
+};
+
+export const triggers = {
+  evaluate: (city, manualWeather = null) => api.post('/triggers/evaluate', { city, manual_weather: manualWeather }),
+  history: () => api.get('/triggers/history'),
+};
+
+export const claims = {
+  history: () => api.get('/claims/history'),
+  detail: (claimId) => api.get(`/claims/${claimId}`),
+};
+
+export const rewards = {
+  history: () => api.get('/rewards/history'),
+};
+
+export const severity = {
+  get: () => api.post('/severity'),
+};
+
+export const riskScore = {
+  get: () => api.post('/risk-score'),
+};
+
+export const dashboard = {
+  summary: () => api.get('/dashboard/summary'),
 };
 
 export default api;

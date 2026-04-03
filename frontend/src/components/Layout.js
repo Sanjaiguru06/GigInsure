@@ -5,11 +5,13 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger
 } from './ui/dropdown-menu';
-import { Shield, LayoutDashboard, CreditCard, User, LogOut, Menu } from 'lucide-react';
+import { Shield, LayoutDashboard, CreditCard, User, LogOut, Menu, Zap, Coins } from 'lucide-react';
 
 const NAV_ITEMS = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/subscribe', label: 'Subscribe', icon: CreditCard },
+  { path: '/claims', label: 'Claims', icon: Zap },
+  { path: '/rewards', label: 'Rewards', icon: Coins },
 ];
 
 export default function Layout({ children }) {

@@ -418,6 +418,341 @@ class GigInsureAPITester:
         
         return False
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # MODULE 3 & 4 TESTS: Risk & Severity Engine + Financial Engine
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def test_trigger_evaluation_heavy_rain(self):
+        """Test trigger evaluation with heavy rain scenario"""
+        success, data, response = self.run_test(
+            "Trigger Evaluation - Heavy Rain",
+            "POST",
+            "triggers/evaluate",
+            200,
+            {
+                "city": "Chennai",
+                "manual_weather": {
+                    "rainfall_mm": 55,
+                    "wind_speed_kmh": 25,
+                    "temperature": 26,
+                    "humidity": 90,
+                    "description": "heavy rain"
+                }
+            }
+        )
+        
+        if success and data:
+            print(f"   ✓ Trigger ID: {data.get('trigger_id', 'N/A')}")
+            print(f"   ✓ Decision: {data.get('decision', 'N/A')}")
+            print(f"   ✓ Weather Severity: {data.get('weather_severity', {}).get('severity', 'N/A')}")
+            
+            # Check if claim was auto-processed
+            claim = data.get('claim')
+            if claim:
+                print(f"   ✓ Claim Status: {claim.get('status', 'N/A')}")
+                print(f"   ✓ Payout: ₹{claim.get('payout', 0)}")
+            
+            # Check if rewards were given
+            reward = data.get('reward')
+            if reward:
+                print(f"   ✓ Reward Coins: {reward.get('total_coins', 0)}")
+        
+        return success
+
+    def test_trigger_evaluation_extreme_heat(self):
+        """Test trigger evaluation with extreme heat scenario"""
+        success, data, response = self.run_test(
+            "Trigger Evaluation - Extreme Heat",
+            "POST",
+            "triggers/evaluate",
+            200,
+            {
+                "city": "Chennai",
+                "manual_weather": {
+                    "rainfall_mm": 0,
+                    "wind_speed_kmh": 8,
+                    "temperature": 43,
+                    "humidity": 30,
+                    "description": "extreme heat"
+                }
+            }
+        )
+        
+        if success and data:
+            print(f"   ✓ Decision: {data.get('decision', 'N/A')}")
+            reward = data.get('reward')
+            if reward:
+                print(f"   ✓ Reward Coins: {reward.get('total_coins', 0)} (expected ~70)")
+                for trigger in reward.get('triggers', []):
+                    print(f"     - {trigger.get('detail', 'N/A')}: +{trigger.get('coins', 0)} coins")
+        
+        return success
+
+    def test_trigger_evaluation_cyclone(self):
+        """Test trigger evaluation with cyclone scenario"""
+        success, data, response = self.run_test(
+            "Trigger Evaluation - Cyclone",
+            "POST",
+            "triggers/evaluate",
+            200,
+            {
+                "city": "Chennai",
+                "manual_weather": {
+                    "rainfall_mm": 85,
+                    "wind_speed_kmh": 55,
+                    "temperature": 24,
+                    "humidity": 95,
+                    "description": "cyclone conditions"
+                }
+            }
+        )
+        
+        if success and data:
+            print(f"   ✓ Decision: {data.get('decision', 'N/A')}")
+            print(f"   ✓ Weather Severity: {data.get('weather_severity', {}).get('severity', 'N/A')} (expected: extreme)")
+            
+            claim = data.get('claim')
+            if claim:
+                print(f"   ✓ Claim Status: {claim.get('status', 'N/A')}")
+                print(f"   ✓ Payout: ₹{claim.get('payout', 0)}")
+        
+        return success
+
+    def test_trigger_evaluation_live_weather(self):
+        """Test trigger evaluation with live weather (no manual override)"""
+        success, data, response = self.run_test(
+            "Trigger Evaluation - Live Weather",
+            "POST",
+            "triggers/evaluate",
+            200,
+            {"city": "Chennai"}
+        )
+        
+        if success and data:
+            print(f"   ✓ Decision: {data.get('decision', 'N/A')}")
+            weather = data.get('weather_data', {})
+            print(f"   ✓ Live Weather Source: {weather.get('source', 'N/A')}")
+            print(f"   ✓ Temperature: {weather.get('temperature', 'N/A')}°C")
+            print(f"   ✓ Rainfall: {weather.get('rainfall_mm', 'N/A')}mm")
+        
+        return success
+
+    def test_duplicate_claim_fraud_detection(self):
+        """Test that duplicate claims within 24h are rejected"""
+        # First trigger evaluation
+        success1, data1, response1 = self.run_test(
+            "First Trigger Evaluation",
+            "POST",
+            "triggers/evaluate",
+            200,
+            {
+                "city": "Chennai",
+                "manual_weather": {
+                    "rainfall_mm": 60,
+                    "wind_speed_kmh": 30,
+                    "temperature": 25,
+                    "humidity": 85,
+                    "description": "heavy rain"
+                }
+            }
+        )
+        
+        if not success1:
+            print("   ❌ First trigger evaluation failed")
+            return False
+        
+        # Wait a moment then try again (should be rejected for fraud)
+        time.sleep(1)
+        
+        success2, data2, response2 = self.run_test(
+            "Duplicate Claim Detection",
+            "POST",
+            "triggers/evaluate",
+            200,
+            {
+                "city": "Chennai",
+                "manual_weather": {
+                    "rainfall_mm": 65,
+                    "wind_speed_kmh": 35,
+                    "temperature": 24,
+                    "humidity": 90,
+                    "description": "heavy rain"
+                }
+            }
+        )
+        
+        if success2 and data2:
+            claim = data2.get('claim')
+            if claim and claim.get('status') == 'rejected':
+                fraud_flags = claim.get('fraud_check', {}).get('flags', [])
+                if 'duplicate_claim_24h' in fraud_flags:
+                    print("   ✅ Duplicate claim correctly rejected for fraud")
+                    return True
+                else:
+                    print("   ⚠️  Claim rejected but not for duplicate fraud")
+            else:
+                print("   ⚠️  Duplicate claim was not rejected")
+        
+        return False
+
+    def test_claims_history(self):
+        """Test claims history endpoint"""
+        success, data, response = self.run_test(
+            "Claims History",
+            "GET",
+            "claims/history",
+            200
+        )
+        
+        if success and data:
+            claims = data.get('claims', [])
+            print(f"   ✓ Total Claims: {len(claims)}")
+            print(f"   ✓ Total Payout: ₹{data.get('total_payout', 0)}")
+            print(f"   ✓ Approved: {data.get('approved_count', 0)}")
+            print(f"   ✓ Rejected: {data.get('rejected_count', 0)}")
+            
+            # Show recent claims
+            for i, claim in enumerate(claims[:2]):
+                print(f"     - {claim.get('claim_id', 'N/A')}: {claim.get('status', 'N/A')} (₹{claim.get('payout', 0)})")
+        
+        return success
+
+    def test_rewards_history(self):
+        """Test rewards history endpoint"""
+        success, data, response = self.run_test(
+            "Rewards History",
+            "GET",
+            "rewards/history",
+            200
+        )
+        
+        if success and data:
+            rewards = data.get('rewards', [])
+            print(f"   ✓ Total Rewards: {len(rewards)}")
+            print(f"   ✓ Total Earned: {data.get('total_earned', 0)} coins")
+            
+            # Show recent rewards
+            for i, reward in enumerate(rewards[:2]):
+                print(f"     - {reward.get('reward_id', 'N/A')}: +{reward.get('total_coins', 0)} coins")
+        
+        return success
+
+    def test_triggers_history(self):
+        """Test triggers history endpoint"""
+        success, data, response = self.run_test(
+            "Triggers History",
+            "GET",
+            "triggers/history",
+            200
+        )
+        
+        if success and data:
+            triggers = data.get('triggers', [])
+            print(f"   ✓ Total Triggers: {len(triggers)}")
+            
+            # Show recent triggers
+            for i, trigger in enumerate(triggers[:2]):
+                print(f"     - {trigger.get('trigger_id', 'N/A')}: {trigger.get('decision', 'N/A')}")
+        
+        return success
+
+    def test_dashboard_summary(self):
+        """Test dashboard summary endpoint"""
+        success, data, response = self.run_test(
+            "Dashboard Summary",
+            "GET",
+            "dashboard/summary",
+            200
+        )
+        
+        if success and data:
+            print(f"   ✓ Has Active Policy: {data.get('has_active_policy', False)}")
+            print(f"   ✓ Total Payout: ₹{data.get('total_payout', 0)}")
+            print(f"   ✓ Total Claims: {data.get('total_claims', 0)}")
+            print(f"   ✓ Approved Claims: {data.get('approved_claims', 0)}")
+            print(f"   ✓ Total Coins Earned: {data.get('total_coins_earned', 0)}")
+            print(f"   ✓ Available Coins: {data.get('available_coins', 0)}")
+            print(f"   ✓ Wallet Balance: ₹{data.get('wallet_balance', 0)}")
+            
+            # Check if policy details are included
+            policy = data.get('policy')
+            if policy:
+                print(f"   ✓ Policy ID: {policy.get('policy_id', 'N/A')}")
+        
+        return success
+
+    def test_wallet_redeem_success(self):
+        """Test successful coin redemption"""
+        success, data, response = self.run_test(
+            "Redeem 100 Coins",
+            "POST",
+            "wallet/redeem",
+            200,
+            {"coins": 100}
+        )
+        
+        if success and data:
+            redemption = data.get('redemption', {})
+            print(f"   ✓ Redemption ID: {redemption.get('redemption_id', 'N/A')}")
+            print(f"   ✓ Coins Redeemed: {redemption.get('coins_redeemed', 0)}")
+            print(f"   ✓ Cash Value: ₹{redemption.get('cash_value', 0)}")
+        
+        return success
+
+    def test_wallet_redeem_insufficient(self):
+        """Test redemption with insufficient coins"""
+        success, data, response = self.run_test(
+            "Redeem Insufficient Coins",
+            "POST",
+            "wallet/redeem",
+            400,  # Should fail
+            {"coins": 10000}  # Large amount
+        )
+        
+        if success:
+            print("   ✅ Insufficient coins correctly rejected")
+        
+        return success
+
+    def test_severity_endpoint(self):
+        """Test severity classification endpoint"""
+        success, data, response = self.run_test(
+            "Get Severity",
+            "POST",
+            "severity",
+            200
+        )
+        
+        if success and data:
+            weather = data.get('weather', {})
+            severity = data.get('severity', {})
+            ai_assessment = data.get('ai_assessment', {})
+            
+            print(f"   ✓ Current Severity: {severity.get('severity', 'N/A')}")
+            print(f"   ✓ Trigger Type: {severity.get('trigger', 'N/A')}")
+            print(f"   ✓ AI Risk Score: {ai_assessment.get('risk_score', 'N/A')}/100")
+            print(f"   ✓ Weather Source: {weather.get('source', 'N/A')}")
+        
+        return success
+
+    def test_risk_score_endpoint(self):
+        """Test risk score calculation endpoint"""
+        success, data, response = self.run_test(
+            "Get Risk Score",
+            "POST",
+            "risk-score",
+            200
+        )
+        
+        if success and data:
+            print(f"   ✓ Risk Score: {data.get('risk_score', 'N/A')}/100")
+            print(f"   ✓ Risk Level: {data.get('risk_level', 'N/A')}")
+            
+            ai_assessment = data.get('ai_assessment', {})
+            print(f"   ✓ AI Assessment: {ai_assessment.get('assessment', 'N/A')[:50]}...")
+        
+        return success
+
     def run_all_tests(self):
         """Run all API tests"""
         print("🧪 AUTHENTICATION TESTS")
@@ -435,7 +770,7 @@ class GigInsureAPITester:
         # Test rider login
         rider_token = self.test_auth_login_rider()
         
-        print("\n🧪 CORE API TESTS")
+        print("\n🧪 CORE API TESTS (Module 1)")
         print("-" * 30)
         
         # Test pricing API
@@ -457,6 +792,34 @@ class GigInsureAPITester:
         
         # Test cities API
         self.test_cities_api()
+        
+        print("\n🧪 MODULE 3 & 4 TESTS: Risk & Severity + Financial Engine")
+        print("-" * 60)
+        
+        # Test trigger evaluations with different scenarios
+        self.test_trigger_evaluation_heavy_rain()
+        self.test_trigger_evaluation_extreme_heat()
+        self.test_trigger_evaluation_cyclone()
+        self.test_trigger_evaluation_live_weather()
+        
+        # Test fraud detection
+        self.test_duplicate_claim_fraud_detection()
+        
+        # Test history endpoints
+        self.test_claims_history()
+        self.test_rewards_history()
+        self.test_triggers_history()
+        
+        # Test dashboard summary
+        self.test_dashboard_summary()
+        
+        # Test wallet redemption
+        self.test_wallet_redeem_success()
+        self.test_wallet_redeem_insufficient()
+        
+        # Test severity and risk endpoints
+        self.test_severity_endpoint()
+        self.test_risk_score_endpoint()
         
         print("\n🧪 SECURITY & EDGE CASE TESTS")
         print("-" * 30)
