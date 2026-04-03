@@ -47,7 +47,7 @@ export default function ChatbotPanel() {
       <button
         data-testid="chatbot-toggle-btn"
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 w-14 h-14 bg-[#D95D39] hover:bg-[#C24D2C] text-white rounded-full shadow-lg flex items-center justify-center transition-all duration-200 hover:scale-105 z-50"
+        className="fixed bottom-6 right-6 w-14 h-14 bg-[#D95D39] hover:bg-[#C24D2C] text-white rounded-full shadow-lg flex items-center justify-center transition-all duration-200 hover:scale-105 z-[9999]"
       >
         <MessageCircle className="w-6 h-6" />
       </button>
@@ -55,7 +55,7 @@ export default function ChatbotPanel() {
   }
 
   return (
-    <div className="fixed bottom-6 right-6 w-[380px] h-[520px] bg-white rounded-2xl shadow-2xl border border-[#E3DFD8] flex flex-col z-50 overflow-hidden" data-testid="chatbot-panel">
+    <div className="fixed bottom-6 right-6 w-[380px] h-[520px] bg-white rounded-2xl shadow-2xl border border-[#E3DFD8] flex flex-col z-[9999] overflow-hidden" data-testid="chatbot-panel">
       {/* Header */}
       <div className="bg-[#D95D39] text-white px-4 py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2">

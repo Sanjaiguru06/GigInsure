@@ -1,59 +1,47 @@
 # GigInsure - Product Requirements Document
 
 ## Problem Statement
-AI-Powered Parametric Insurance for Food Delivery Partners (Swiggy/Zomato riders). Hybrid financial protection combining parametric insurance (major disruptions) with reward-based system (minor disruptions). Built for Guidewire DEV Trails University Hackathon Phase 2.
+AI-Powered Parametric Insurance for Food Delivery Partners. Guidewire DEV Trails Hackathon.
 
 ## Architecture
-- **Frontend**: React.js + Tailwind CSS + Shadcn UI
-- **Backend**: FastAPI (Python)
-- **Database**: MongoDB
-- **AI**: Groq API (llama-3.3-70b-versatile) for risk assessment & severity analysis
-- **Weather**: OpenWeatherMap API (real data)
-- **Payment**: Simulated/Mock flow
-- **Auth**: JWT (httpOnly cookies)
+- Frontend: React.js + Tailwind CSS + Shadcn UI + Recharts
+- Backend: FastAPI (Python)
+- Database: MongoDB
+- AI: Groq API (llama-3.3-70b-versatile)
+- Weather: OpenWeatherMap API
+- Payment: Simulated/Mock
 
-## What's Been Implemented
+## All Implemented Features (April 3, 2026)
 
-### Phase 1 (April 3, 2026) - Module 1: Ground Floor + Subscription
-- JWT auth (register/login/logout/refresh/me)
-- Brute force protection
-- Dynamic premium pricing with Groq AI + OpenWeatherMap
-- Policy CRUD + mock payment flow
-- Rider dashboard, subscription page
+### Module 1: User Subscription
+- JWT auth, brute force protection, admin/rider seeding
+- Dynamic AI premium pricing (Groq + OpenWeatherMap)
+- Policy CRUD + mock payment
 
-### Phase 2 (April 3, 2026) - Module 3 & 4: Risk Engine + Financial Engine
-- **5 Automated Triggers**:
-  1. Heavy Rain (>=50mm) → Insurance payout
-  2. Cyclone (>=70mm + wind>=40km/h) → Insurance payout (extreme)
-  3. Moderate Rain (>=30mm) → Partial insurance
-  4. Traffic Delay (>=1.5x) → Reward coins
-  5. Extreme Heat (>=40°C) → Reward coins + combo bonus
-- **Zero-Touch Claims**: Auto-processing with AI severity assessment
-- **Payout Calculation**: (Expected - Actual) × Severity Factor
-- **Fraud Detection**: Device validation, duplicate check, zone validation
-- **Reward System**: Coins for traffic/heat, combo bonuses
-- **Wallet**: Coin accumulation, redemption (100 coins = ₹1)
-- **Claims & Rewards Pages**: Full history, trigger evaluation panel
-- **Dashboard Summary**: Stats, recent claims/rewards
+### Module 3: Risk & Severity Engine
+- 5 automated parametric triggers (rain, cyclone, moderate rain, traffic, heat)
+- AI severity assessment, risk scoring, decision routing
 
-## Hackathon Deliverables Status
-- [x] Registration Process
-- [x] Insurance Policy Management
-- [x] Dynamic Premium Calculation (AI-powered)
-- [x] Claims Management (zero-touch, automated)
-- [x] 3-5 Automated Triggers (5 implemented)
-- [x] Seamless zero-touch claim process
+### Module 4: Financial Engine
+- Zero-touch claims, payout calculation, fraud detection
+- Reward coin system, wallet, coin redemption
 
-## Prioritized Backlog
-### P0
-- Module 2: Activity & Intent Tracking (simulated)
+### Module 2: Activity Tracking
+- Intent-to-work verification, session simulation
+- Activity status (active/idle/offline), movement tracking
 
-### P1
-- Admin dashboard
-- Policy renewal auto-reminder
-- Charts/analytics for earnings/payouts
+### New Features
+- Landing Page with hero, how-it-works, triggers
+- AI Risk Advisor Chatbot (Groq-powered)
+- Earnings Analytics Charts (Recharts - line, bar, pie)
+- Risk Heatmap (10 Indian cities, live weather)
+- Admin Dashboard (stats, riders, cities, activity)
+- Payment History page
+- Policy Renewal flow
 
-### P2
-- Mobile responsive improvements
-- Multilingual support
-- Dynamic premium adjustment based on history
+## Pages
+- / (Landing), /login, /dashboard, /subscribe, /claims, /rewards, /heatmap, /activity, /payments, /admin
+
+## Credentials
+- Admin: admin@giginsure.com / admin123
+- Rider: rider@test.com / rider123
