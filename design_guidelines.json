@@ -1,0 +1,106 @@
+{
+  "theme_and_archetype": {
+    "theme": "light",
+    "archetype": "Archetype 1 (Organic & Earthy)",
+    "description": "A grounding, warm, and highly legible interface for gig economy delivery riders. Uses terracotta/orange tones mimicking delivery apps, but paired with natural moss greens and sand colors to communicate financial safety, insurance protection, and organic growth (rewards)."
+  },
+  "colors": {
+    "background": {
+      "base": "#F9F8F6",
+      "surface": "#FFFFFF",
+      "muted": "#EBE8E3"
+    },
+    "text": {
+      "primary": "#1C1A17",
+      "secondary": "#5C5852",
+      "inverse": "#FFFFFF"
+    },
+    "brand": {
+      "primary": "#D95D39",
+      "primary_hover": "#C24D2C",
+      "secondary": "#4A7C59",
+      "accent": "#E89B31"
+    },
+    "status": {
+      "safe": "#4A7C59",
+      "warning": "#E89B31",
+      "danger": "#C44536",
+      "info": "#2D6A85"
+    },
+    "border": {
+      "default": "#E3DFD8",
+      "focus": "#D95D39"
+    }
+  },
+  "typography": {
+    "heading_font": "Manrope",
+    "body_font": "IBM Plex Sans",
+    "scales": {
+      "h1": "text-4xl sm:text-5xl font-extrabold tracking-tight text-[#1C1A17]",
+      "h2": "text-2xl sm:text-3xl font-bold tracking-tight text-[#1C1A17]",
+      "h3": "text-xl font-semibold text-[#1C1A17]",
+      "h4": "text-lg font-medium text-[#1C1A17]",
+      "body": "text-base leading-relaxed text-[#5C5852]",
+      "small_label": "text-xs uppercase tracking-[0.2em] font-semibold text-[#5C5852]"
+    }
+  },
+  "spacing_and_layout": {
+    "generous_padding": "p-6 sm:p-8",
+    "section_gap": "gap-8 lg:gap-12",
+    "grid_strategy": "Control Room Grid: Base grid-cols-1 md:grid-cols-3 lg:grid-cols-4. Use gap-6. Children should have h-full to prevent jagged bottoms.",
+    "border_radius": {
+      "container": "rounded-2xl",
+      "button": "rounded-lg",
+      "pill": "rounded-full"
+    }
+  },
+  "surface_strategies": {
+    "dashboard_cards": "Flat white background (bg-white), 1px solid border (border-[#E3DFD8]), NO default shadow. On hover: shadow-lg shadow-[#EBE8E3] and -translate-y-0.5 transition-transform.",
+    "glass_header": "bg-white/70 backdrop-blur-xl border-b border-[#E3DFD8] z-50 sticky top-0",
+    "reward_wallet_card": "Use a subtle gradient background: bg-gradient-to-br from-[#F9F8F6] to-[#EBE8E3] with a terracotta primary accent text."
+  },
+  "components": {
+    "buttons": "Shadcn Button. Primary uses #D95D39. Fully rounded (rounded-full) for primary actions, rounded-lg for secondary. Must have hover states and focus rings.",
+    "sliders": "Shadcn Slider for Simulation Mode. Track color #D95D39 for temperature/traffic, #2D6A85 for rain.",
+    "tabs": "Shadcn Tabs. Underline or pill style, not bulky boxes. Use for 'Dashboard | Simulation | Subscriptions'.",
+    "badges": "Pill-shaped (rounded-full px-3 py-1 text-xs font-bold). Color codes based on status (safe=green, warning=orange, danger=red).",
+    "charts": "Recharts. Use simple line charts for Earnings & Payout timeline. Remove thick grid lines, use thin dotted #E3DFD8. Line stroke #D95D39.",
+    "icons": "lucide-react. Stroke width 2. Uses #D95D39 for primary interactions."
+  },
+  "page_specific_instructions": {
+    "Login_Register": "Split screen: Left side form, Right side image (media.hero_rider). Clean typography.",
+    "Subscription_Page": "Pricing cards with 'Dynamic Premium' badge. Show tier features clearly.",
+    "Rider_Dashboard": "Bento grid layout. Cards for: Policy Status (Active/Inactive), Risk & Severity (Current levels), Earnings & Payouts (Chart), Reward Wallet.",
+    "Simulation_Mode": "A dedicated panel or modal with 3 sliders: Rain Intensity, Traffic Congestion, Temperature. Moving sliders dynamically updates a 'Risk Score' and 'Auto Status/Processing Pipeline' view.",
+    "Reward_Wallet": "Show large Coin balance with a gold/yellow icon. List recent 'Reward History' below it."
+  },
+  "motion_and_interactions": {
+    "hover": "transition-all duration-200 ease-in-out",
+    "list_entrance": "Framer motion staggered fade-in up (y: 20 -> 0, opacity: 0 -> 1)",
+    "coin_earn": "Scale pop animation when coins are added.",
+    "accessibility": "Respect prefers-reduced-motion."
+  },
+  "media": {
+    "hero_rider": {
+      "url": "https://images.unsplash.com/photo-1638381225866-c73ec6106fd2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHwxfHxtb3RvcmN5Y2xlJTIwcmlkZXIlMjBjaXR5fGVufDB8fHx8MTc3NTE5NTQxM3ww&ixlib=rb-4.1.0&q=85",
+      "description": "Rider on motorcycle, used for hero section, login background, or profile banner."
+    },
+    "risk_rain": {
+      "url": "https://images.unsplash.com/photo-1765683011450-c2b8dae7b223?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDB8MHwxfHNlYXJjaHwzfHxoZWF2eSUyMHJhaW4lMjBjaXR5JTIwdHJhZmZpY3xlbnwwfHx8fDE3NzUxOTU0MTJ8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Heavy rain and traffic in a city, used in the simulation mode background or risk panel visual."
+    },
+    "traffic_city": {
+      "url": "https://images.unsplash.com/photo-1773111578401-c2c4f1ea36ba?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHwzfHxtb3RvcmN5Y2xlJTIwcmlkZXIlMjBjaXR5fGVufDB8fHx8MTc3NTE5NTQxM3ww&ixlib=rb-4.1.0&q=85",
+      "description": "Motorcyclists navigating busy city street, used to represent traffic conditions in simulation."
+    }
+  },
+  "testing_attributes": {
+    "guideline": "CRITICAL: All interactive elements MUST include data-testid.",
+    "examples": [
+      "data-testid='login-submit-button'",
+      "data-testid='simulation-rain-slider'",
+      "data-testid='reward-wallet-card'",
+      "data-testid='policy-status-badge'"
+    ]
+  }
+}
