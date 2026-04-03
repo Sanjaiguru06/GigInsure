@@ -1,34 +1,43 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* GigInsure Custom Styles */
+
+/* Override Progress bar color */
+[role="progressbar"] > div {
+  background-color: #D95D39;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+/* Select dropdown styling */
+[data-radix-select-viewport] {
+  max-height: 200px;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+/* Smooth page transitions */
+main {
+  animation: fadeInUp 0.3s ease-out;
 }
 
-.App-link {
-    color: #61dafb;
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+/* Focus ring override for brand color */
+*:focus-visible {
+  outline: 2px solid #D95D39;
+  outline-offset: 2px;
+}
+
+/* Badge animations */
+.animate-badge-pulse {
+  animation: badgePulse 2s ease-in-out infinite;
+}
+
+@keyframes badgePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
