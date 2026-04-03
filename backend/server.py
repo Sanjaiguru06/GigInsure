@@ -116,6 +116,12 @@ class TriggerEvaluateRequest(BaseModel):
 class RedeemCoinsRequest(BaseModel):
     coins: int
 
+class ChatRequest(BaseModel):
+    message: str
+
+class ActivitySimulateRequest(BaseModel):
+    status: str = "active"  # active, idle, offline
+
 # ─── Severity Factors ────────────────────────────────────────────────
 SEVERITY_FACTORS = {
     "extreme": 0.9,
@@ -959,6 +965,293 @@ async def get_dashboard_summary(request: Request):
         "latest_trigger": latest_trigger,
         "recent_claims": claims[:3],
         "recent_rewards": rewards[:3]
+    }
+
+# ══════════════════════════════════════════════════════════════════════
+# AI RISK ADVISOR CHATBOT
+# ══════════════════════════════════════════════════════════════════════
+
+@api_router.post("/chat")
+async def ai_chat(req: ChatRequest, request: Request):
+    user = await get_current_user(request)
+    city = user.get("city", "Chennai")
+    weather = await get_weather_data(city)
+    severity = classify_weather_severity(weather.get("rainfall_mm", 0), weather.get("wind_speed_kmh", 0))
+    earnings = await estimate_expected_earnings(city, user["_id"])
+    policy = await db.policies.find_one({"user_id": user["_id"], "status": "active"}, {"_id": 0})
+
+    system_prompt = f"""You are GigInsure AI Risk Advisor for food delivery riders in India. Be concise, friendly, use simple language.
+
+Current data for {city}:
+- Weather: {weather.get('description','clear')}, Rain: {weather.get('rainfall_mm',0)}mm, Wind: {weather.get('wind_speed_kmh',0)}km/h, Temp: {weather.get('temperature',30)}°C
+- Severity: {severity.get('severity','none')} ({severity.get('description','')})
+- Expected earnings today: Rs{earnings.get('expected_daily',300)}
+- Policy: {'Active' if policy else 'No active policy'}
+- Rider: {user.get('name','Rider')}, Coins: {user.get('reward_coins',0)}
+
+Help the rider with questions about: weather risk, whether to go out, earnings prediction, insurance coverage, rewards.
+Keep answers under 100 words. Use Rs for currency."""
+
+    try:
+        completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": req.message}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.7,
+            max_tokens=200
+        )
+        reply = completion.choices[0].message.content.strip()
+        return {"reply": reply, "weather": weather, "severity": severity["severity"]}
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return {"reply": f"Current conditions in {city}: {weather.get('description','clear')}, {weather.get('temperature',30)}°C. Severity: {severity['severity']}. Stay safe!", "weather": weather, "severity": severity["severity"]}
+
+# ══════════════════════════════════════════════════════════════════════
+# RISK HEATMAP — All Cities Weather
+# ══════════════════════════════════════════════════════════════════════
+
+@api_router.get("/heatmap")
+async def get_heatmap():
+    cities_list = ["Chennai", "Mumbai", "Delhi", "Bangalore", "Kolkata", "Hyderabad", "Pune", "Jaipur", "Ahmedabad", "Lucknow"]
+    city_coords = {
+        "Chennai": [13.08, 80.27], "Mumbai": [19.08, 72.88], "Delhi": [28.61, 77.21],
+        "Bangalore": [12.97, 77.59], "Kolkata": [22.57, 88.36], "Hyderabad": [17.39, 78.49],
+        "Pune": [18.52, 73.86], "Jaipur": [26.91, 75.79], "Ahmedabad": [23.02, 72.57], "Lucknow": [26.85, 80.95]
+    }
+    results = []
+    for city in cities_list:
+        weather = await get_weather_data(city)
+        sev = classify_weather_severity(weather.get("rainfall_mm", 0), weather.get("wind_speed_kmh", 0))
+        risk_info = CITY_RISK_MAP.get(city.lower(), {"risk": "medium", "base_premium": 30})
+        results.append({
+            "city": city, "coords": city_coords.get(city, [20, 78]),
+            "weather": weather, "severity": sev["severity"], "trigger": sev["trigger"],
+            "risk_level": risk_info["risk"], "base_premium": risk_info["base_premium"],
+            "description": sev["description"]
+        })
+    return {"cities": results}
+
+# ══════════════════════════════════════════════════════════════════════
+# ADMIN DASHBOARD
+# ══════════════════════════════════════════════════════════════════════
+
+@api_router.get("/admin/stats")
+async def admin_stats(request: Request):
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    total_riders = await db.users.count_documents({"role": "rider"})
+    active_policies = await db.policies.count_documents({"status": "active"})
+    total_claims = await db.claims.count_documents({})
+    approved_claims = await db.claims.count_documents({"status": "approved"})
+    rejected_claims = await db.claims.count_documents({"status": "rejected"})
+    
+    all_claims = await db.claims.find({}, {"_id": 0, "payout": 1}).to_list(1000)
+    total_payouts = sum(c.get("payout", 0) for c in all_claims)
+    
+    all_policies = await db.policies.find({}, {"_id": 0, "premium": 1}).to_list(1000)
+    total_premiums = sum(p.get("premium", 0) for p in all_policies)
+    
+    total_rewards = await db.rewards.count_documents({})
+    total_triggers = await db.trigger_events.count_documents({})
+    
+    # City breakdown
+    city_stats = []
+    for city_name in ["Chennai", "Mumbai", "Delhi", "Bangalore", "Kolkata", "Hyderabad", "Pune", "Jaipur", "Ahmedabad", "Lucknow"]:
+        city_lower = city_name.lower()
+        city_policies = await db.policies.count_documents({"city": city_lower})
+        city_stats.append({"city": city_name, "policies": city_policies, "risk": CITY_RISK_MAP.get(city_lower, {}).get("risk", "medium")})
+    
+    return {
+        "total_riders": total_riders, "active_policies": active_policies,
+        "total_claims": total_claims, "approved_claims": approved_claims,
+        "rejected_claims": rejected_claims, "total_payouts": total_payouts,
+        "total_premiums": total_premiums, "total_rewards": total_rewards,
+        "total_triggers": total_triggers, "city_stats": city_stats,
+        "fraud_rate": round(rejected_claims / max(total_claims, 1) * 100, 1)
+    }
+
+@api_router.get("/admin/riders")
+async def admin_riders(request: Request):
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    riders = await db.users.find({"role": "rider"}, {"_id": 0, "password_hash": 0}).to_list(100)
+    return {"riders": riders}
+
+@api_router.get("/admin/recent-activity")
+async def admin_recent_activity(request: Request):
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    claims = await db.claims.find({}, {"_id": 0}).sort("timestamp", -1).to_list(10)
+    triggers = await db.trigger_events.find({}, {"_id": 0}).sort("timestamp", -1).to_list(10)
+    return {"recent_claims": claims, "recent_triggers": triggers}
+
+# ══════════════════════════════════════════════════════════════════════
+# ACTIVITY TRACKING (Module 2)
+# ══════════════════════════════════════════════════════════════════════
+
+@api_router.post("/activity/simulate")
+async def simulate_activity(req: ActivitySimulateRequest, request: Request):
+    user = await get_current_user(request)
+    activity_doc = {
+        "user_id": user["_id"],
+        "status": req.status,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "device_id": user.get("device_id", ""),
+        "city": user.get("city", "Chennai"),
+        "session_duration": round(random.uniform(0.5, 8.0), 1),
+        "speed": round(random.uniform(0, 40), 1) if req.status == "active" else 0,
+        "movement": "moving" if req.status == "active" else ("stationary" if req.status == "idle" else "none")
+    }
+    await db.activity_logs.insert_one(activity_doc)
+    activity_doc.pop("_id", None)
+    
+    # Update user activity status
+    await db.users.update_one(
+        {"_id": ObjectId(user["_id"])},
+        {"$set": {"activity_status": req.status, "last_active": datetime.now(timezone.utc).isoformat()}}
+    )
+    return activity_doc
+
+@api_router.get("/activity/status")
+async def get_activity_status(request: Request):
+    user = await get_current_user(request)
+    # Get recent activity
+    recent = await db.activity_logs.find(
+        {"user_id": user["_id"]}, {"_id": 0}
+    ).sort("timestamp", -1).to_list(10)
+    
+    # Intent check: was rider active in last 48 hours?
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    recent_active = await db.activity_logs.count_documents({
+        "user_id": user["_id"], "status": "active", "timestamp": {"$gt": cutoff}
+    })
+    intent_status = "active" if recent_active > 0 else "inactive"
+    
+    return {
+        "current_status": user.get("activity_status", "offline"),
+        "intent_status": intent_status,
+        "recent_active_sessions": recent_active,
+        "last_active": user.get("last_active"),
+        "recent_logs": recent[:5]
+    }
+
+# ══════════════════════════════════════════════════════════════════════
+# POLICY RENEWAL
+# ══════════════════════════════════════════════════════════════════════
+
+@api_router.post("/policies/renew")
+async def renew_policy(request: Request):
+    user = await get_current_user(request)
+    # Find expired or about-to-expire policy
+    current = await db.policies.find_one(
+        {"user_id": user["_id"]}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+    if not current:
+        raise HTTPException(status_code=400, detail="No previous policy to renew")
+    
+    # Check no active policy
+    active = await db.policies.find_one(
+        {"user_id": user["_id"], "status": "active", "end_date": {"$gt": datetime.now(timezone.utc).isoformat()}},
+        {"_id": 0}
+    )
+    if active:
+        raise HTTPException(status_code=400, detail="You already have an active policy")
+    
+    now = datetime.now(timezone.utc)
+    new_policy = {
+        "policy_id": f"POL-{secrets.token_hex(4).upper()}",
+        "user_id": user["_id"],
+        "city": current["city"],
+        "premium": current["premium"],
+        "device_id": current.get("device_id", ""),
+        "plan_type": "weekly",
+        "start_date": now.isoformat(),
+        "end_date": (now + timedelta(days=7)).isoformat(),
+        "status": "active",
+        "renewed_from": current["policy_id"],
+        "created_at": now.isoformat(),
+        "paid_at": now.isoformat(),
+        "payment_method": "auto_renewal"
+    }
+    await db.policies.insert_one(new_policy)
+    new_policy.pop("_id", None)
+    
+    payment_doc = {
+        "payment_id": f"PAY-{secrets.token_hex(4).upper()}",
+        "policy_id": new_policy["policy_id"],
+        "user_id": user["_id"],
+        "amount": new_policy["premium"],
+        "method": "auto_renewal",
+        "status": "success",
+        "timestamp": now.isoformat()
+    }
+    await db.payments.insert_one(payment_doc)
+    
+    return {"message": "Policy renewed successfully", "policy": new_policy}
+
+# ══════════════════════════════════════════════════════════════════════
+# PAYMENT HISTORY
+# ══════════════════════════════════════════════════════════════════════
+
+@api_router.get("/payments/history")
+async def get_payment_history(request: Request):
+    user = await get_current_user(request)
+    payments = await db.payments.find({"user_id": user["_id"]}, {"_id": 0}).sort("timestamp", -1).to_list(50)
+    total_paid = sum(p.get("amount", 0) for p in payments)
+    return {"payments": payments, "total_paid": total_paid, "count": len(payments)}
+
+# ══════════════════════════════════════════════════════════════════════
+# EARNINGS ANALYTICS
+# ══════════════════════════════════════════════════════════════════════
+
+@api_router.get("/analytics/earnings")
+async def get_earnings_analytics(request: Request):
+    user = await get_current_user(request)
+    uid = user["_id"]
+    city = user.get("city", "Chennai").lower()
+    base_earnings = CITY_AVG_DAILY_EARNINGS.get(city, 300)
+    
+    # Build 7-day earnings data from triggers/claims
+    data_points = []
+    claims = await db.claims.find({"user_id": uid}, {"_id": 0}).sort("timestamp", 1).to_list(100)
+    rewards_list = await db.rewards.find({"user_id": uid}, {"_id": 0}).sort("timestamp", 1).to_list(100)
+    
+    for i in range(7):
+        day = datetime.now(timezone.utc) - timedelta(days=6 - i)
+        day_str = day.strftime("%a")
+        expected = base_earnings + random.randint(-30, 30)
+        day_claims = [c for c in claims if c.get("timestamp", "")[:10] == day.strftime("%Y-%m-%d")]
+        day_rewards = [r for r in rewards_list if r.get("timestamp", "")[:10] == day.strftime("%Y-%m-%d")]
+        payout = sum(c.get("payout", 0) for c in day_claims)
+        coins = sum(r.get("total_coins", 0) for r in day_rewards)
+        actual = expected - random.randint(0, 80) if day_claims else expected - random.randint(0, 20)
+        
+        data_points.append({
+            "day": day_str, "date": day.strftime("%Y-%m-%d"),
+            "expected": expected, "actual": max(0, actual),
+            "payout": payout, "coins": coins
+        })
+    
+    # Claim distribution
+    total_claims = await db.claims.count_documents({"user_id": uid})
+    approved = await db.claims.count_documents({"user_id": uid, "status": "approved"})
+    rejected = total_claims - approved
+    
+    total_payout = sum(c.get("payout", 0) for c in claims)
+    total_premium = sum(p.get("premium", 0) for p in await db.policies.find({"user_id": uid}, {"_id": 0}).to_list(50))
+    
+    return {
+        "daily_earnings": data_points,
+        "claim_distribution": {"approved": approved, "rejected": rejected},
+        "total_payout": total_payout,
+        "total_premium": total_premium,
+        "roi": round((total_payout / max(total_premium, 1)) * 100, 1)
     }
 
 # ─── STARTUP ─────────────────────────────────────────────────────────

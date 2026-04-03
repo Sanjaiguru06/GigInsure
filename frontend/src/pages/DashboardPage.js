@@ -6,10 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Progress } from '../components/ui/progress';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import {
   Shield, CloudRain, Thermometer, Wind, Coins, ArrowRight,
   CheckCircle, AlertTriangle, XCircle, Clock, Droplets, TrendingUp,
-  Banknote, Zap, FileCheck
+  Banknote, Zap, FileCheck, RefreshCw
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -19,18 +20,22 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState(null);
   const [weatherData, setWeatherData] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [renewing, setRenewing] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const city = user?.city || 'Chennai';
-        const [summaryRes, weatherRes] = await Promise.all([
+        const [summaryRes, weatherRes, analyticsRes] = await Promise.all([
           axios.get(`${API}/dashboard/summary`, { withCredentials: true }),
-          axios.get(`${API}/weather/${city}`, { withCredentials: true })
+          axios.get(`${API}/weather/${city}`, { withCredentials: true }),
+          axios.get(`${API}/analytics/earnings`, { withCredentials: true }).catch(() => ({ data: null }))
         ]);
         setSummary(summaryRes.data);
         setWeatherData(weatherRes.data);
+        setAnalytics(analyticsRes.data);
       } catch (err) {
         console.error('Dashboard error:', err);
       } finally {
@@ -39,6 +44,18 @@ export default function DashboardPage() {
     };
     fetchData();
   }, [user]);
+
+  const handleRenew = async () => {
+    setRenewing(true);
+    try {
+      await axios.post(`${API}/policies/renew`, {}, { withCredentials: true });
+      window.location.reload();
+    } catch (err) {
+      console.error('Renew error:', err);
+    } finally {
+      setRenewing(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -66,9 +83,14 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          {!hasPolicy && (
+          {!hasPolicy && !summary?.policy && (
             <Button data-testid="subscribe-now-btn" onClick={() => navigate('/subscribe')} className="bg-[#D95D39] hover:bg-[#C24D2C] text-white rounded-full px-6 h-11 font-semibold">
               Subscribe Now <ArrowRight className="ml-2 w-4 h-4" />
+            </Button>
+          )}
+          {!hasPolicy && summary?.policy && (
+            <Button data-testid="renew-policy-btn" onClick={handleRenew} disabled={renewing} className="bg-[#E89B31] hover:bg-[#d08a2a] text-white rounded-full px-6 h-11 font-semibold">
+              <RefreshCw className={`mr-2 w-4 h-4 ${renewing ? 'animate-spin' : ''}`} /> Renew Policy
             </Button>
           )}
           {hasPolicy && (
@@ -279,6 +301,83 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Earnings Charts */}
+      {analytics && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6" data-testid="earnings-charts">
+          {/* Earnings Line Chart */}
+          <Card className="border-[#E3DFD8] shadow-none">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold text-[#1C1A17] flex items-center gap-2" style={{ fontFamily: 'Manrope, sans-serif' }}>
+                <TrendingUp className="w-4 h-4 text-[#4A7C59]" /> 7-Day Earnings
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={analytics.daily_earnings}>
+                  <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#5C5852' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#5C5852' }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #E3DFD8', fontSize: 12 }} />
+                  <Line type="monotone" dataKey="expected" stroke="#4A7C59" strokeWidth={2} dot={false} name="Expected" />
+                  <Line type="monotone" dataKey="actual" stroke="#D95D39" strokeWidth={2} dot={false} name="Actual" />
+                  <Line type="monotone" dataKey="payout" stroke="#2D6A85" strokeWidth={2} dot={false} name="Payout" />
+                </LineChart>
+              </ResponsiveContainer>
+              <div className="flex gap-4 mt-2 text-[10px] text-[#5C5852] justify-center">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#4A7C59]" /> Expected</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#D95D39]" /> Actual</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#2D6A85]" /> Payout</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Rewards Bar Chart + Claim Pie */}
+          <Card className="border-[#E3DFD8] shadow-none">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold text-[#1C1A17] flex items-center gap-2" style={{ fontFamily: 'Manrope, sans-serif' }}>
+                <Coins className="w-4 h-4 text-[#E89B31]" /> Coins & Claims
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-[10px] text-[#5C5852] mb-1 text-center">Coins per Day</p>
+                  <ResponsiveContainer width="100%" height={140}>
+                    <BarChart data={analytics.daily_earnings}>
+                      <XAxis dataKey="day" tick={{ fontSize: 9, fill: '#5C5852' }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #E3DFD8', fontSize: 11 }} />
+                      <Bar dataKey="coins" fill="#E89B31" radius={[4, 4, 0, 0]} name="Coins" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex flex-col items-center justify-center">
+                  <p className="text-[10px] text-[#5C5852] mb-1">Claims Status</p>
+                  <ResponsiveContainer width="100%" height={120}>
+                    <PieChart>
+                      <Pie data={[
+                        { name: 'Approved', value: analytics.claim_distribution.approved || 0 },
+                        { name: 'Rejected', value: analytics.claim_distribution.rejected || 0 }
+                      ]} cx="50%" cy="50%" innerRadius={30} outerRadius={50} dataKey="value">
+                        <Cell fill="#4A7C59" />
+                        <Cell fill="#C44536" />
+                      </Pie>
+                      <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #E3DFD8', fontSize: 11 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="flex gap-3 text-[10px] text-[#5C5852]">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#4A7C59]" /> Approved</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#C44536]" /> Rejected</span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 pt-3 border-t border-[#E3DFD8] flex justify-between text-xs">
+                <span className="text-[#5C5852]">Premium vs Payout ROI:</span>
+                <span className="font-bold text-[#4A7C59]">{analytics.roi}%</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

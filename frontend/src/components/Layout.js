@@ -5,58 +5,52 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger
 } from './ui/dropdown-menu';
-import { Shield, LayoutDashboard, CreditCard, User, LogOut, Menu, Zap, Coins } from 'lucide-react';
-
-const NAV_ITEMS = [
-  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/subscribe', label: 'Subscribe', icon: CreditCard },
-  { path: '/claims', label: 'Claims', icon: Zap },
-  { path: '/rewards', label: 'Rewards', icon: Coins },
-];
+import { Shield, LayoutDashboard, CreditCard, LogOut, Menu, Zap, Coins, Map, Activity, Receipt, Settings } from 'lucide-react';
 
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const isAdmin = user?.role === 'admin';
 
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login');
-  };
+  const NAV_ITEMS = isAdmin ? [
+    { path: '/admin', label: 'Admin', icon: Settings },
+    { path: '/heatmap', label: 'Heatmap', icon: Map },
+  ] : [
+    { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/subscribe', label: 'Subscribe', icon: CreditCard },
+    { path: '/claims', label: 'Claims', icon: Zap },
+    { path: '/rewards', label: 'Rewards', icon: Coins },
+    { path: '/heatmap', label: 'Heatmap', icon: Map },
+  ];
+
+  const MORE_ITEMS = isAdmin ? [] : [
+    { path: '/activity', label: 'Activity', icon: Activity },
+    { path: '/payments', label: 'Payments', icon: Receipt },
+  ];
+
+  const handleLogout = async () => { await logout(); navigate('/login'); };
 
   return (
     <div className="min-h-screen bg-[#F9F8F6]">
-      {/* Glass Header */}
       <header className="bg-white/70 backdrop-blur-xl border-b border-[#E3DFD8] z-50 sticky top-0" data-testid="main-header">
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
-          <Link to="/dashboard" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+          <Link to={isAdmin ? '/admin' : '/dashboard'} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <Shield className="w-6 h-6 text-[#D95D39]" />
-            <span className="text-lg font-extrabold text-[#1C1A17] tracking-tight" style={{ fontFamily: 'Manrope, sans-serif' }}>
-              GigInsure
-            </span>
+            <span className="text-lg font-extrabold text-[#1C1A17] tracking-tight" style={{ fontFamily: 'Manrope, sans-serif' }}>GigInsure</span>
+            {isAdmin && <span className="text-[10px] bg-[#D95D39]/10 text-[#D95D39] font-bold px-2 py-0.5 rounded-full">ADMIN</span>}
           </Link>
 
-          {/* Desktop Nav */}
-          <nav className="hidden sm:flex items-center gap-1">
+          <nav className="hidden md:flex items-center gap-1">
             {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
               <Link key={path} to={path}>
-                <Button
-                  variant="ghost"
-                  data-testid={`nav-${label.toLowerCase()}`}
-                  className={`text-sm font-medium rounded-lg px-3 h-9 ${
-                    location.pathname === path
-                      ? 'bg-[#D95D39]/10 text-[#D95D39]'
-                      : 'text-[#5C5852] hover:text-[#1C1A17] hover:bg-[#EBE8E3]'
-                  }`}
-                >
-                  <Icon className="w-4 h-4 mr-1.5" />
-                  {label}
+                <Button variant="ghost" data-testid={`nav-${label.toLowerCase()}`} className={`text-sm font-medium rounded-lg px-3 h-9 ${location.pathname === path ? 'bg-[#D95D39]/10 text-[#D95D39]' : 'text-[#5C5852] hover:text-[#1C1A17] hover:bg-[#EBE8E3]'}`}>
+                  <Icon className="w-4 h-4 mr-1.5" />{label}
                 </Button>
               </Link>
             ))}
           </nav>
 
-          {/* User Menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" data-testid="user-menu-trigger" className="h-9 px-2 text-[#5C5852] hover:text-[#1C1A17]">
@@ -73,26 +67,22 @@ export default function Layout({ children }) {
                 <p className="text-xs text-[#5C5852]">{user?.email}</p>
               </div>
               <DropdownMenuSeparator />
-              {/* Mobile nav items */}
-              <div className="sm:hidden">
+              {/* Mobile nav */}
+              <div className="md:hidden">
                 {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
-                  <DropdownMenuItem key={path} onClick={() => navigate(path)}>
-                    <Icon className="w-4 h-4 mr-2" />
-                    {label}
-                  </DropdownMenuItem>
+                  <DropdownMenuItem key={path} onClick={() => navigate(path)}><Icon className="w-4 h-4 mr-2" />{label}</DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
               </div>
-              <DropdownMenuItem onClick={handleLogout} data-testid="logout-button" className="text-[#C44536]">
-                <LogOut className="w-4 h-4 mr-2" />
-                Sign Out
-              </DropdownMenuItem>
+              {MORE_ITEMS.map(({ path, label, icon: Icon }) => (
+                <DropdownMenuItem key={path} onClick={() => navigate(path)}><Icon className="w-4 h-4 mr-2" />{label}</DropdownMenuItem>
+              ))}
+              {MORE_ITEMS.length > 0 && <DropdownMenuSeparator />}
+              <DropdownMenuItem onClick={handleLogout} data-testid="logout-button" className="text-[#C44536]"><LogOut className="w-4 h-4 mr-2" />Sign Out</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </header>
-
-      {/* Main Content */}
       <main>{children}</main>
     </div>
   );
