@@ -1,13 +1,12 @@
 // craco.config.js
 const path = require("path");
 
-const webpackConfig = {
+module.exports = {
   webpack: {
     alias: {
       "@": path.resolve(__dirname, "src"),
     },
     configure: (webpackConfig) => {
-      // Reduce watched directories during local dev
       webpackConfig.watchOptions = {
         ...webpackConfig.watchOptions,
         ignored: [
@@ -23,5 +22,3 @@ const webpackConfig = {
     },
   },
 };
-
-module.exports = webpackConfig;
