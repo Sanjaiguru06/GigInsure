@@ -1,0 +1,43 @@
+/* GigInsure Custom Styles */
+
+/* Override Progress bar color */
+[role="progressbar"] > div {
+  background-color: #D95D39;
+}
+
+/* Select dropdown styling */
+[data-radix-select-viewport] {
+  max-height: 200px;
+}
+
+/* Smooth page transitions */
+main {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Focus ring override for brand color */
+*:focus-visible {
+  outline: 2px solid #D95D39;
+  outline-offset: 2px;
+}
+
+/* Badge animations */
+.animate-badge-pulse {
+  animation: badgePulse 2s ease-in-out infinite;
+}
+
+@keyframes badgePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
