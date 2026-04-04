@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { Toaster } from './components/ui/sonner';
+import { Toaster } from 'components/ui/sonner'; // ✅ FIXED
 import Layout from './components/Layout';
 import ChatbotPanel from './components/ChatbotPanel';
 import LandingPage from './pages/LandingPage';
@@ -16,7 +16,12 @@ import ActivityPage from './pages/ActivityPage';
 
 function ProtectedRoute({ children, adminOnly = false }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="min-h-screen bg-[#F9F8F6] flex items-center justify-center"><div className="animate-spin w-8 h-8 border-2 border-[#D95D39] border-t-transparent rounded-full" /></div>;
+  if (loading)
+    return (
+      <div className="min-h-screen bg-[#F9F8F6] flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-2 border-[#D95D39] border-t-transparent rounded-full" />
+      </div>
+    );
   if (!user) return <Navigate to="/login" replace />;
   if (adminOnly && user.role !== 'admin') return <Navigate to="/dashboard" replace />;
   return <Layout>{children}<ChatbotPanel /></Layout>;
@@ -24,7 +29,12 @@ function ProtectedRoute({ children, adminOnly = false }) {
 
 function AppRoutes() {
   const { user, loading } = useAuth();
-  if (loading) return <div className="min-h-screen bg-[#F9F8F6] flex items-center justify-center"><div className="animate-spin w-8 h-8 border-2 border-[#D95D39] border-t-transparent rounded-full" /></div>;
+  if (loading)
+    return (
+      <div className="min-h-screen bg-[#F9F8F6] flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-2 border-[#D95D39] border-t-transparent rounded-full" />
+      </div>
+    );
 
   return (
     <Routes>
