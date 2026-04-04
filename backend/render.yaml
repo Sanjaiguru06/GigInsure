@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: giginsure-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: MONGO_URL
+        sync: false          # set manually in Render dashboard
+      - key: DB_NAME
+        sync: false          # e.g. giginsure
+      - key: JWT_SECRET
+        generateValue: true  # Render auto-generates a secure random value
+      - key: FRONTEND_URL
+        sync: false          # your Vercel URL e.g. https://your-app.vercel.app
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENWEATHER_API_KEY
+        sync: false
+      - key: ADMIN_EMAIL
+        value: admin@giginsure.com
+      - key: ADMIN_PASSWORD
+        sync: false
