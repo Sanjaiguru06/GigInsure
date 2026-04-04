@@ -1,8 +1,8 @@
 import * as React from "react"
-import * as AlertDialogPrimitive from ".radix-ui/react-alert-dialog"
+import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog" // ✅ FIXED
 
-import { cn } from "./lib/utils"
-import { buttonVariants } from "./components/ui/button"
+import { cn } from "../../lib/utils" // ✅ FIXED
+import { buttonVariants } from "./button" // ✅ FIXED
 
 const AlertDialog = AlertDialogPrimitive.Root
 
@@ -35,20 +35,14 @@ const AlertDialogContent = React.forwardRef(({ className, ...props }, ref) => (
 ))
 AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName
 
-const AlertDialogHeader = ({
-  className,
-  ...props
-}) => (
+const AlertDialogHeader = ({ className, ...props }) => (
   <div
     className={cn("flex flex-col space-y-2 text-center sm:text-left", className)}
     {...props} />
 )
 AlertDialogHeader.displayName = "AlertDialogHeader"
 
-const AlertDialogFooter = ({
-  className,
-  ...props
-}) => (
+const AlertDialogFooter = ({ className, ...props }) => (
   <div
     className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2", className)}
     {...props} />
