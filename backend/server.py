@@ -1426,7 +1426,13 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    """
+    Closing the MongoDB connection using the correct 
+    variable name to prevent startup crashes.
+    """
+    if 'mongo_client' in globals():
+        mongo_client.close()
+        logger.info("MongoDB connection closed.")
 
 
 @app.get("/health")
