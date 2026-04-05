@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { pricing, policies, payment } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -70,18 +71,77 @@ export default function SubscriptionPage() {
 
   const handlePayment = async () => {
     if (!policyCreated) return;
-    setPaymentStep(1); // Processing
-    await new Promise(r => setTimeout(r, 1500));
-    setPaymentStep(2); // Verifying
-    await new Promise(r => setTimeout(r, 1000));
+    setPaymentStep(1); // Creating order
+
     try {
-      await payment.confirm(policyCreated.policy_id);
-      setPaymentStep(3); // Success
-      await new Promise(r => setTimeout(r, 1500));
-      navigate('/dashboard');
+      // Step 1 — Create Razorpay order on backend
+      const orderRes = await axios.post(
+        `${process.env.REACT_APP_BACKEND_URL}/api/payment/create-order`,
+        { policy_id: policyCreated.policy_id },
+        { withCredentials: true }
+      );
+      const { order_id, amount, key_id, user_name, user_email } = orderRes.data;
+
+      // Step 2 — Open Razorpay checkout
+      const options = {
+        key:         key_id,
+        amount:      amount,
+        currency:    'INR',
+        name:        'GigInsure',
+        description: `Weekly Protection — ${policyCreated.city || city}`,
+        order_id:    order_id,
+        prefill: {
+          name:  user_name,
+          email: user_email,
+        },
+        theme: { color: '#D95D39' },
+        handler: async (response) => {
+          // Step 3 — Verify signature on backend
+          setPaymentStep(2);
+          try {
+            await axios.post(
+              `${process.env.REACT_APP_BACKEND_URL}/api/payment/verify`,
+              {
+                razorpay_order_id:   response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature:  response.razorpay_signature,
+                policy_id:           policyCreated.policy_id,
+              },
+              { withCredentials: true }
+            );
+            setPaymentStep(3); // Success
+            setTimeout(() => navigate('/dashboard'), 1800);
+          } catch (err) {
+            console.error('Verify error:', err);
+            setPaymentStep(-1);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setPaymentStep(0); // User closed modal — reset
+            setShowPayment(false);
+          },
+        },
+      };
+
+      // Load Razorpay checkout.js dynamically if not already loaded
+      if (!window.Razorpay) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+          s.onload  = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      }
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+      setPaymentStep(0); // Reset step — Razorpay modal takes over
+
     } catch (err) {
       console.error('Payment error:', err);
-      setPaymentStep(-1); // Failure
+      setPaymentStep(-1);
     }
   };
 
