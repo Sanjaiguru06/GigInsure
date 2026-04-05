@@ -20,6 +20,9 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from groq import Groq
+import razorpay
+import hmac
+import hashlib
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
@@ -28,6 +31,11 @@ db = client[os.environ['DB_NAME']]
 
 # Groq client
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+# Razorpay client
+_rzp_key_id     = os.environ.get("RAZORPAY_KEY_ID", "")
+_rzp_key_secret = os.environ.get("RAZORPAY_KEY_SECRET", "")
+razorpay_client = razorpay.Client(auth=(_rzp_key_id, _rzp_key_secret)) if _rzp_key_id else None
 
 # JWT config
 JWT_ALGORITHM = "HS256"
@@ -118,6 +126,15 @@ class RedeemCoinsRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+
+class RazorpayOrderRequest(BaseModel):
+    policy_id: str
+
+class RazorpayVerifyRequest(BaseModel):
+    razorpay_order_id:   str
+    razorpay_payment_id: str
+    razorpay_signature:  str
+    policy_id:           str
 
 class ActivitySimulateRequest(BaseModel):
     status: str = "active"  # active, idle, offline
@@ -461,34 +478,112 @@ async def get_policy_history(request: Request):
     policies = await db.policies.find({"user_id": user["_id"]}, {"_id": 0}).sort("created_at", -1).to_list(50)
     return {"policies": policies}
 
-# ─── MOCK PAYMENT ────────────────────────────────────────────────────
+# ─── RAZORPAY PAYMENT ────────────────────────────────────────────────
+@api_router.post("/payment/create-order")
+async def create_razorpay_order(req: RazorpayOrderRequest, request: Request):
+    """Step 1 — Create a Razorpay order and return order_id to frontend."""
+    user = await get_current_user(request)
+    if not razorpay_client:
+        raise HTTPException(status_code=503, detail="Payment gateway not configured")
+
+    policy = await db.policies.find_one(
+        {"policy_id": req.policy_id, "user_id": user["_id"]}, {"_id": 0}
+    )
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    if policy["status"] == "active":
+        raise HTTPException(status_code=400, detail="Policy already active")
+
+    amount_paise = int(policy["premium"] * 100)  # Razorpay expects paise
+    order = razorpay_client.order.create({
+        "amount":   amount_paise,
+        "currency": "INR",
+        "receipt":  req.policy_id,
+        "notes":    {"policy_id": req.policy_id, "user_id": user["_id"], "city": policy.get("city", "")}
+    })
+    return {
+        "order_id":  order["id"],
+        "amount":    amount_paise,
+        "currency":  "INR",
+        "key_id":    _rzp_key_id,
+        "policy_id": req.policy_id,
+        "user_name": user.get("name", ""),
+        "user_email": user.get("email", ""),
+    }
+
+@api_router.post("/payment/verify")
+async def verify_razorpay_payment(req: RazorpayVerifyRequest, request: Request):
+    """Step 2 — Verify Razorpay signature, then activate policy."""
+    user = await get_current_user(request)
+    if not razorpay_client:
+        raise HTTPException(status_code=503, detail="Payment gateway not configured")
+
+    # Verify HMAC-SHA256 signature
+    payload = f"{req.razorpay_order_id}|{req.razorpay_payment_id}"
+    expected = hmac.new(
+        _rzp_key_secret.encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(expected, req.razorpay_signature):
+        raise HTTPException(status_code=400, detail="Payment verification failed — invalid signature")
+
+    policy = await db.policies.find_one(
+        {"policy_id": req.policy_id, "user_id": user["_id"]}, {"_id": 0}
+    )
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+
+    # Activate policy
+    await db.policies.update_one(
+        {"policy_id": req.policy_id},
+        {"$set": {
+            "status":               "active",
+            "payment_method":       "razorpay",
+            "razorpay_order_id":    req.razorpay_order_id,
+            "razorpay_payment_id":  req.razorpay_payment_id,
+            "paid_at":              datetime.now(timezone.utc).isoformat()
+        }}
+    )
+
+    # Record payment
+    payment_doc = {
+        "payment_id":           req.razorpay_payment_id,
+        "razorpay_order_id":    req.razorpay_order_id,
+        "policy_id":            req.policy_id,
+        "user_id":              user["_id"],
+        "amount":               policy["premium"],
+        "method":               "razorpay",
+        "status":               "success",
+        "timestamp":            datetime.now(timezone.utc).isoformat()
+    }
+    await db.payments.insert_one(payment_doc)
+    payment_doc.pop("_id", None)
+
+    return {"message": "Payment verified & policy activated", "policy_status": "active", "payment": payment_doc}
+
 @api_router.post("/payment/confirm")
-async def confirm_payment(req: PaymentConfirmRequest, request: Request):
+async def confirm_payment_legacy(req: PaymentConfirmRequest, request: Request):
+    """Legacy endpoint — kept for backward compatibility (non-Razorpay flows)."""
     user = await get_current_user(request)
     policy = await db.policies.find_one({"policy_id": req.policy_id, "user_id": user["_id"]}, {"_id": 0})
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
     if policy["status"] == "active":
         raise HTTPException(status_code=400, detail="Policy already active")
-    
     await db.policies.update_one(
         {"policy_id": req.policy_id},
         {"$set": {"status": "active", "payment_method": req.payment_method, "paid_at": datetime.now(timezone.utc).isoformat()}}
     )
-    
-    # Record payment
     payment_doc = {
         "payment_id": f"PAY-{secrets.token_hex(4).upper()}",
-        "policy_id": req.policy_id,
-        "user_id": user["_id"],
-        "amount": policy["premium"],
-        "method": req.payment_method,
-        "status": "success",
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "policy_id":  req.policy_id,
+        "user_id":    user["_id"],
+        "amount":     policy["premium"],
+        "method":     req.payment_method,
+        "status":     "success",
+        "timestamp":  datetime.now(timezone.utc).isoformat()
     }
     await db.payments.insert_one(payment_doc)
     payment_doc.pop("_id", None)
-    
     return {"message": "Payment successful", "policy_status": "active", "payment": payment_doc}
 
 # ─── WEATHER ROUTE ───────────────────────────────────────────────────
