@@ -20,9 +20,10 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from groq import Groq
-import razorpay
 import hmac
 import hashlib
+import base64
+import asyncio
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
@@ -32,10 +33,22 @@ db = client[os.environ['DB_NAME']]
 # Groq client
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# Razorpay client
+# Razorpay credentials (no SDK — direct HTTP calls avoid pkg_resources issue on Python 3.14)
 _rzp_key_id     = os.environ.get("RAZORPAY_KEY_ID", "")
 _rzp_key_secret = os.environ.get("RAZORPAY_KEY_SECRET", "")
-razorpay_client = razorpay.Client(auth=(_rzp_key_id, _rzp_key_secret)) if _rzp_key_id else None
+
+async def _rzp_create_order(data: dict) -> dict:
+    """Create a Razorpay order via direct HTTPS — no SDK dependency."""
+    credentials = base64.b64encode(f"{_rzp_key_id}:{_rzp_key_secret}".encode()).decode()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://api.razorpay.com/v1/orders",
+            json=data,
+            headers={"Authorization": f"Basic {credentials}"},
+            timeout=15.0
+        )
+        resp.raise_for_status()
+        return resp.json()
 
 # JWT config
 JWT_ALGORITHM = "HS256"
@@ -483,7 +496,7 @@ async def get_policy_history(request: Request):
 async def create_razorpay_order(req: RazorpayOrderRequest, request: Request):
     """Step 1 — Create a Razorpay order and return order_id to frontend."""
     user = await get_current_user(request)
-    if not razorpay_client:
+    if not _rzp_key_id:
         raise HTTPException(status_code=503, detail="Payment gateway not configured")
 
     policy = await db.policies.find_one(
@@ -495,7 +508,7 @@ async def create_razorpay_order(req: RazorpayOrderRequest, request: Request):
         raise HTTPException(status_code=400, detail="Policy already active")
 
     amount_paise = int(policy["premium"] * 100)  # Razorpay expects paise
-    order = razorpay_client.order.create({
+    order = await _rzp_create_order({
         "amount":   amount_paise,
         "currency": "INR",
         "receipt":  req.policy_id,
@@ -515,7 +528,7 @@ async def create_razorpay_order(req: RazorpayOrderRequest, request: Request):
 async def verify_razorpay_payment(req: RazorpayVerifyRequest, request: Request):
     """Step 2 — Verify Razorpay signature, then activate policy."""
     user = await get_current_user(request)
-    if not razorpay_client:
+    if not _rzp_key_secret:
         raise HTTPException(status_code=503, detail="Payment gateway not configured")
 
     # Verify HMAC-SHA256 signature
