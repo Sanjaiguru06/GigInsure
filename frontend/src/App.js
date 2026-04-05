@@ -13,6 +13,7 @@ import RiskHeatmapPage from './pages/RiskHeatmapPage';
 import AdminDashboard from './pages/AdminDashboard';
 import PaymentHistoryPage from './pages/PaymentHistoryPage';
 import ActivityPage from './pages/ActivityPage';
+import DemoPage from './pages/DemoPage';
 
 function ProtectedRoute({ children, adminOnly = false }) {
   const { user, loading } = useAuth();
@@ -38,6 +39,7 @@ function AppRoutes() {
       <Route path="/activity" element={<ProtectedRoute><ActivityPage /></ProtectedRoute>} />
       <Route path="/payments" element={<ProtectedRoute><PaymentHistoryPage /></ProtectedRoute>} />
       <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
+      <Route path="/demo" element={<ProtectedRoute><DemoPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to={user ? "/dashboard" : "/"} replace />} />
     </Routes>
   );
