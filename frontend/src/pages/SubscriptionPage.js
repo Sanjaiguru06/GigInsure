@@ -347,7 +347,7 @@ export default function SubscriptionPage() {
                     onClick={handlePayment}
                     className="w-full bg-[#4A7C59] hover:bg-[#3d6a4a] text-white rounded-full h-11 font-semibold"
                   >
-                    Pay via UPI (Simulated)
+                    Pay via UPI 
                   </Button>
                   <Button
                     data-testid="pay-wallet-button"
@@ -355,7 +355,7 @@ export default function SubscriptionPage() {
                     variant="outline"
                     className="w-full rounded-full h-11 border-[#E3DFD8] text-[#1C1A17]"
                   >
-                    Pay via Wallet (Simulated)
+                    Pay via Wallet 
                   </Button>
                 </div>
               </div>
