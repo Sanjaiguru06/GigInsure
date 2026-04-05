@@ -23,36 +23,30 @@ from groq import Groq
 import razorpay
 import hmac
 import hashlib
+import asyncio
 
 # MongoDB connection
-mongo_url = os.environ.get('MONGO_URL')
-# Using a descriptive name to avoid conflict with Razorpay or Groq clients
-mongo_client = AsyncIOMotorClient(mongo_url)
-db = mongo_client[os.environ.get('DB_NAME', 'test')]
+# Use .get() so a missing var doesn't crash the import; startup event validates below.
+_mongo_url = os.environ.get('MONGO_URL', '')
+_db_name   = os.environ.get('DB_NAME', 'giginsure')
+if not _mongo_url:
+    raise RuntimeError("MONGO_URL environment variable is not set. Add it in your Render dashboard.")
+client = AsyncIOMotorClient(_mongo_url)
+db = client[_db_name]
 
 # Groq client
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# Razorpay Configuration (Explicitly named to avoid variable shadowing)
-RZP_ID = os.environ.get("RAZORPAY_KEY_ID")
-RZP_SECRET = os.environ.get("RAZORPAY_KEY_SECRET")
-
-razorpay_client = None
-if RZP_ID and RZP_SECRET:
-    try:
-        # Initialize the specific razorpay client
-        razorpay_client = razorpay.Client(auth=(RZP_ID, RZP_SECRET))
-        logging.info("✅ Razorpay client initialized successfully.")
-    except Exception as e:
-        logging.error(f"❌ Failed to initialize Razorpay client: {e}")
-else:
-    logging.warning("⚠️ Razorpay keys missing. Payment routes will be disabled.")
+# Razorpay client
+_rzp_key_id     = os.environ.get("RAZORPAY_KEY_ID", "")
+_rzp_key_secret = os.environ.get("RAZORPAY_KEY_SECRET", "")
+razorpay_client = razorpay.Client(auth=(_rzp_key_id, _rzp_key_secret)) if _rzp_key_id else None
 
 # JWT config
 JWT_ALGORITHM = "HS256"
 
 def get_jwt_secret():
-    return os.environ.get("JWT_SECRET", "fallback_secret_for_dev_only")
+    return os.environ["JWT_SECRET"]
 
 # App setup
 app = FastAPI()
@@ -506,12 +500,15 @@ async def create_razorpay_order(req: RazorpayOrderRequest, request: Request):
         raise HTTPException(status_code=400, detail="Policy already active")
 
     amount_paise = int(policy["premium"] * 100)  # Razorpay expects paise
-    order = razorpay_client.order.create({
+    # razorpay SDK is synchronous — run it in a thread pool to avoid blocking
+    # the async event loop that Motor (MongoDB) also uses.
+    order_payload = {
         "amount":   amount_paise,
         "currency": "INR",
         "receipt":  req.policy_id,
         "notes":    {"policy_id": req.policy_id, "user_id": user["_id"], "city": policy.get("city", "")}
-    })
+    }
+    order = await asyncio.to_thread(razorpay_client.order.create, order_payload)
     return {
         "order_id":  order["id"],
         "amount":    amount_paise,
@@ -1426,13 +1423,7 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    """
-    Closing the MongoDB connection using the correct 
-    variable name to prevent startup crashes.
-    """
-    if 'mongo_client' in globals():
-        mongo_client.close()
-        logger.info("MongoDB connection closed.")
+    client.close()
 
 
 @app.get("/health")
