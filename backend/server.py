@@ -25,23 +25,34 @@ import hmac
 import hashlib
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+mongo_url = os.environ.get('MONGO_URL')
+# Using a descriptive name to avoid conflict with Razorpay or Groq clients
+mongo_client = AsyncIOMotorClient(mongo_url)
+db = mongo_client[os.environ.get('DB_NAME', 'test')]
 
 # Groq client
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# Razorpay client
-_rzp_key_id     = os.environ.get("RAZORPAY_KEY_ID", "")
-_rzp_key_secret = os.environ.get("RAZORPAY_KEY_SECRET", "")
-razorpay_client = razorpay.Client(auth=(_rzp_key_id, _rzp_key_secret)) if _rzp_key_id else None
+# Razorpay Configuration (Explicitly named to avoid variable shadowing)
+RZP_ID = os.environ.get("RAZORPAY_KEY_ID")
+RZP_SECRET = os.environ.get("RAZORPAY_KEY_SECRET")
+
+razorpay_client = None
+if RZP_ID and RZP_SECRET:
+    try:
+        # Initialize the specific razorpay client
+        razorpay_client = razorpay.Client(auth=(RZP_ID, RZP_SECRET))
+        logging.info("✅ Razorpay client initialized successfully.")
+    except Exception as e:
+        logging.error(f"❌ Failed to initialize Razorpay client: {e}")
+else:
+    logging.warning("⚠️ Razorpay keys missing. Payment routes will be disabled.")
 
 # JWT config
 JWT_ALGORITHM = "HS256"
 
 def get_jwt_secret():
-    return os.environ["JWT_SECRET"]
+    return os.environ.get("JWT_SECRET", "fallback_secret_for_dev_only")
 
 # App setup
 app = FastAPI()
