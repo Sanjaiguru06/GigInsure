@@ -1,5 +1,6 @@
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { FlaskConical } from 'lucide-react';
 import { Button } from './ui/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -25,6 +26,7 @@ export default function Layout({ children }) {
   ];
 
   const MORE_ITEMS = isAdmin ? [] : [
+    { path: '/demo', label: 'Demo', icon: FlaskConical },
     { path: '/activity', label: 'Activity', icon: Activity },
     { path: '/payments', label: 'Payments', icon: Receipt },
   ];
