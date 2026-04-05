@@ -23,16 +23,11 @@ from groq import Groq
 import razorpay
 import hmac
 import hashlib
-import asyncio
 
 # MongoDB connection
-# Use .get() so a missing var doesn't crash the import; startup event validates below.
-_mongo_url = os.environ.get('MONGO_URL', '')
-_db_name   = os.environ.get('DB_NAME', 'giginsure')
-if not _mongo_url:
-    raise RuntimeError("MONGO_URL environment variable is not set. Add it in your Render dashboard.")
-client = AsyncIOMotorClient(_mongo_url)
-db = client[_db_name]
+mongo_url = os.environ['MONGO_URL']
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ['DB_NAME']]
 
 # Groq client
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
@@ -500,15 +495,12 @@ async def create_razorpay_order(req: RazorpayOrderRequest, request: Request):
         raise HTTPException(status_code=400, detail="Policy already active")
 
     amount_paise = int(policy["premium"] * 100)  # Razorpay expects paise
-    # razorpay SDK is synchronous — run it in a thread pool to avoid blocking
-    # the async event loop that Motor (MongoDB) also uses.
-    order_payload = {
+    order = razorpay_client.order.create({
         "amount":   amount_paise,
         "currency": "INR",
         "receipt":  req.policy_id,
         "notes":    {"policy_id": req.policy_id, "user_id": user["_id"], "city": policy.get("city", "")}
-    }
-    order = await asyncio.to_thread(razorpay_client.order.create, order_payload)
+    })
     return {
         "order_id":  order["id"],
         "amount":    amount_paise,
