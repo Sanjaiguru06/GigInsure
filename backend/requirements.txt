@@ -45,3 +45,5 @@ typing_extensions==4.15.0
 
 # Payment gateway
 razorpay==1.4.2
+
+setuptools
